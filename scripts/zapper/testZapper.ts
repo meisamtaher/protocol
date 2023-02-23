@@ -186,8 +186,11 @@ async function main() {
   )
 
   const Zapper = await hre.ethers.getContractFactory("Zapper");
+  const permit2Address = "0x000000000022d473030f116ddee9f6b43ac78ba3";
   const zapperInst = await Zapper.deploy(
-    weth
+    ethers.constants.AddressZero,
+    weth,
+    permit2Address
   );
 
 
@@ -276,7 +279,8 @@ async function main() {
     postTradeActionsPayload: Buffer.alloc(0),
     postTradeActionsAddress: frictionlessZapper.address,
     trades: trades.map(i => ({
-      aggregatorCall: i.aggregatorCall
+      target: "0x1111111254eeb25477b68fb85ed929f73a960582",
+      input: i.aggregatorCall
     })),
     amountOut: userWantsRTokenSum,
   }
@@ -284,7 +288,7 @@ async function main() {
     "zapERC20",
     [payload]
   ))
-  
+
   const tx = await zapperInst.connect(signer).zapERC20(payload, {
     gasLimit: 20000000
   })

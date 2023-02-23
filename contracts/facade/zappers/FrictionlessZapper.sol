@@ -23,6 +23,7 @@ interface IStaticATokenLM is IERC20 {
 
     function staticToDynamicAmount(uint256 amount) external view returns (uint256);
 
+    // solhint-disable func-name-mixedcase
     function UNDERLYING_ASSET_ADDRESS() external view returns (address);
 }
 
@@ -35,60 +36,65 @@ struct CTokenMapping {
     IERC20 underlying;
 }
 
-struct TokenBasket {
-    IERC20[] tokens;
-    IStaticATokenLM[] saTokens;
-    ICToken[] cTokens;
-}
-
-struct TokenBasketInput {
+struct FrictionLessZapperConfig {
     IERC20[] tokens;
     IStaticATokenLM[] saTokens;
     CTokenMapping[] cTokens;
 }
 
+/**
+ * @title FrictionlessZapper
+ * @notice Implements Zapping functionality for tokens consisting of ERC20s, CTokens and SATokens
+ */
 contract FrictionlessZapper is IRTokenZapper {
     using FixLib for uint192;
-    IMain public main;
     IRToken public rToken;
+
     IBasketHandler public basketHandler;
     IWrappedNative public wrappedNative;
-    TokenBasket private basket;
+
+    struct Config {
+        IERC20[] tokens;
+        IStaticATokenLM[] saTokens;
+        ICToken[] cTokens;
+    }
+    Config private config;
 
     mapping(address => address) public saTokens;
     mapping(address => address) public cTokens;
 
+    /// @param main_ The instance of IMain used for rToken
+    /// @param rToken_ What rToken this implementation will mint
+    /// @param wrappedNative_ The wrapped gas asset for the network.
+    /// (weth for eth, arbi, optimism, wmatic for polygon)
+    /// @param config_ Defines raw ERC20 tokens in the token basket, and the SA/CTokens.
     constructor(
         IMain main_,
         IRToken rToken_,
         IWrappedNative wrappedNative_,
-        TokenBasketInput memory tokenBasket
+        FrictionLessZapperConfig memory config_
     ) {
-        main = main_;
         wrappedNative = wrappedNative_;
         rToken = rToken_;
         basketHandler = main_.basketHandler();
-        basket.tokens = tokenBasket.tokens;
-        basket.saTokens = tokenBasket.saTokens;
+        config.tokens = config_.tokens;
+        config.saTokens = config_.saTokens;
 
-        // Soldity does not support
-        ICToken[] memory arrayWeCopyToStorage = new ICToken[](tokenBasket.cTokens.length);
+        // Soldity does not support copying arrays of structs to storage for some reason
+        // So we manually store the CTokens
+        ICToken[] memory arrayWeCopyToStorage = new ICToken[](config_.cTokens.length);
 
-        for (uint256 index = 0; index < tokenBasket.saTokens.length; index++) {
-            IStaticATokenLM saToken = tokenBasket.saTokens[index];
+        for (uint256 index = 0; index < config_.saTokens.length; index++) {
+            IStaticATokenLM saToken = config_.saTokens[index];
             saTokens[address(saToken)] = saToken.UNDERLYING_ASSET_ADDRESS();
         }
-        for (uint256 index = 0; index < tokenBasket.cTokens.length; index++) {
-            ICToken cToken = tokenBasket.cTokens[index].cToken;
-            IERC20 underlying = tokenBasket.cTokens[index].underlying;
+        for (uint256 index = 0; index < config_.cTokens.length; index++) {
+            ICToken cToken = config_.cTokens[index].cToken;
+            IERC20 underlying = config_.cTokens[index].underlying;
             arrayWeCopyToStorage[index] = cToken;
             cTokens[address(cToken)] = address(underlying);
         }
-        basket.cTokens = arrayWeCopyToStorage;
-    }
-
-    function getBasket() external view returns (TokenBasket memory output) {
-        output = basket;
+        config.cTokens = arrayWeCopyToStorage;
     }
 
     function updateTokenQuantityArray(
@@ -114,22 +120,27 @@ contract FrictionlessZapper is IRTokenZapper {
         internal
         returns (uint256)
     {
-        // rate has scale 10 + token.decimals
+        // Note: rate has scale (10 + token.decimals)
         uint256 rate = ctoken.exchangeRateCurrent();
 
-        // So to convert into orignal token precision we need
-        // to divide by 10^(10 + token.decimals)
-
+        // To convert into original token precision we need
         // quantity = rate * quantity / 10**10/10**token.decimals;
-        // ^ little bit concerned about precision here. The (rate * quantity) hits 46 digits
+        //              ^ little bit concerned about precision here.
+        //                The (rate * quantity) hits 46 digits for Dai!
         // by inverting quantity you can you can avoid large numbers
-        uint256 quantityScale = 10**(ctoken.decimals() + 10);
-        quantity = quantityScale / quantity; // quantity is scale 10 now
-        return rate / quantity;
+        uint256 numerator = 10**(ctoken.decimals() + 10);
+        quantity = numerator / quantity; // quantity is scale 10 now
+        return rate / quantity; // Output has token.decimals
     }
 
-    // Returns a list if tokens + quantities needed
-    // for some amount of RTokens
+    /// @dev Returns a list if tokens + quantities needed
+    /// for some amount of RTokens.
+    /// While not marked as view, this method is meant to be called off-chain via
+    /// an staticCall/eth_call.
+    ///
+    /// The inner loop has a quadratic time complexity, so can probably spend
+    /// a lot of gas if there is a lot of tokens
+    /// @param quantity The amount of RTokens we want to issue
     function getPrecursorTokens(uint192 quantity)
         external
         override
@@ -171,7 +182,8 @@ contract FrictionlessZapper is IRTokenZapper {
             }
             // solhint-disable no-inline-assembly
             assembly {
-                // Resizes out
+                // Dangerous assembly here means:
+                // Set the length of out to i. Resize out to be length i.
                 mstore(out, i)
             }
             break;
@@ -191,6 +203,7 @@ contract FrictionlessZapper is IRTokenZapper {
         require(msg.sender == address(wrappedNative), "INVALID_CALLER");
     }
 
+    /// @param receiver Who to issue RTokens to, and send refunds
     function convertPrecursorTokensToRToken(address receiver, ZapERC20Params calldata params)
         external
         override
@@ -244,20 +257,20 @@ contract FrictionlessZapper is IRTokenZapper {
     }
 
     function cleanup(address receiver) internal {
-        for (uint256 index = 0; index < basket.tokens.length; index++) {
-            uint256 quantity = basket.tokens[index].balanceOf(address(this));
+        for (uint256 index = 0; index < config.tokens.length; index++) {
+            uint256 quantity = config.tokens[index].balanceOf(address(this));
             if (quantity != 0) {
-                SafeERC20.safeTransfer(IERC20(basket.tokens[index]), receiver, quantity);
+                SafeERC20.safeTransfer(IERC20(config.tokens[index]), receiver, quantity);
             }
         }
-        for (uint256 index = 0; index < basket.saTokens.length; index++) {
-            uint256 quantity = basket.saTokens[index].balanceOf(address(this));
+        for (uint256 index = 0; index < config.saTokens.length; index++) {
+            uint256 quantity = config.saTokens[index].balanceOf(address(this));
             if (quantity != 0) {
-                SafeERC20.safeTransfer(IERC20(basket.saTokens[index]), receiver, quantity);
+                SafeERC20.safeTransfer(IERC20(config.saTokens[index]), receiver, quantity);
             }
         }
-        for (uint256 index = 0; index < basket.cTokens.length; index++) {
-            ICToken token = basket.cTokens[index];
+        for (uint256 index = 0; index < config.cTokens.length; index++) {
+            ICToken token = config.cTokens[index];
             uint256 quantity = token.balanceOf(address(this));
             if (quantity != 0) {
                 SafeERC20.safeTransfer(IERC20(token), receiver, quantity);

@@ -4,9 +4,10 @@ pragma solidity 0.8.17;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IRToken } from "../interfaces/IRToken.sol";
 
-struct AggregatorTrade {
-    // Encoded 1inch aggregator call
-    bytes aggregatorCall;
+// Encoded method call
+struct Trades {
+    address target;
+    bytes input;
 }
 
 struct TokenQuantity {
@@ -28,7 +29,7 @@ struct ZapERC20Params {
     // Total amount to zap / pull from user
     uint256 amountIn;
     // Aggregator trades to do to convert user tokens
-    AggregatorTrade[] trades;
+    Trades[] trades;
     // Will contain the RToken specific functionality
     IRTokenZapper postTradeActionsAddress;
     // Optional encoded data for 'postTradeActionsAddress' contract
