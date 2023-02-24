@@ -107,11 +107,13 @@ const basketTokensToAmountIn = async (
 async function main() {
   await setNextBlockBaseFeePerGas(parseUnits("0.1", "gwei"))
   await mine(1);
-  const provider = new ethers.providers.JsonRpcProvider(process.env.MAINNET_RPC_URL)
-  const network = await provider.getNetwork()
   if (hre.network.name !== 'hardhat') {
     throw new Error("Pls only test against forked network")
   }
+  const ERC20 = await hre.ethers.getContractFactory("ERC20Mock")
+
+  console.log(process.env.MAINNET_RPC_URL)
+  
   await hre.network.provider.request({
     method: "hardhat_reset",
     params: [
@@ -126,64 +128,35 @@ async function main() {
   });
   const weth = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
 
-  const mainAddr = "0x4280E823ac98fD216acC122c487D69064F5F7c87"
-
+  const mainAddr = "0x7697aE4dEf3C3Cd52493Ba3a6F57fc6d8c59108a"
+  
   const FrictionlessZapperFactory = await hre.ethers.getContractFactory("FrictionlessZapper");
-  const rToken = await hre.ethers.getContractAt("IRToken", "0xF618492E7cd4145214D4668D569CA3BcBCa69074")
+  const rToken = await hre.ethers.getContractAt("IRToken", "0xA0d69E286B938e21CBf7E51D71F6A4c8918f482F")
   const frictionlessZapper = await FrictionlessZapperFactory.deploy(
     mainAddr,
-    "0xF618492E7cd4145214D4668D569CA3BcBCa69074",
+    rToken.address,
     weth,
     {
-      tokens: [
-        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-        "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-        "0x6B175474E89094C44Da98b954EedeAC495271d0F",
-        "0x8E870D67F660D95d5be530380D0eC0bd388289E1",
-        "0x0000000000085d4780B73119b644AE5ecd22b376",
-        "0x4Fabb145d64652a948d72533023f6E7A623C7C53",
-        "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
-        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-        "0xC581b735A1688071A1746c968e0798D642EDE491"
-      ],
+      tokens: [],
       saTokens: [
         "0x8f471832C6d35F2a51606a60f482BCfae055D986",
-        "0x83DAc0593BD7dE8fa7137D65Fb898B7b7FF6ede6",
-        "0xF6147b4B44aE6240F7955803B2fD5E15c77bD7ea",
-        "0x21fe646D1Ed0733336F2D4d9b2FE67790a6099D9"
+        "0x21fe646D1Ed0733336F2D4d9b2FE67790a6099D9",
       ],
       cTokens: [
-        { cToken: "0x5d3a536E4D6DbD6114cc1Ead35777bAB948E3643", underlying: "0x6B175474E89094C44Da98b954EedeAC495271d0F" },
         { cToken: "0x39AA39c021dfbaE8faC545936693aC917d5E7563", underlying: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" },
         { cToken: "0xf650C3d88D12dB855b8bf7D11Be6C55A4e07dCC9", underlying: "0xdac17f958d2ee523a2206206994597c13d831ec7" },
-        { cToken: "0xccf4429db6322d5c611ee964527d42e5d685dd6a", underlying: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599" },
-        { cToken: "0x4Ddc2D193948926D02f9B1fE9e1daa0718270ED5", underlying: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" }
       ]
     }
   );
 
   const inputTokenAddr = "0xdac17f958d2ee523a2206206994597c13d831ec7"
-  const user = "0xF28E1B06E00e8774C612e31aB3Ac35d5a720085f"
+  const user = "0xf28e1b06e00e8774c612e31ab3ac35d5a720085f"
 
   const userWantsRTokenSum = parseEther("20");
   const basketAmounts = await frictionlessZapper.callStatic.getPrecursorTokens(
     userWantsRTokenSum
   );
 
-  // Hack to work around (old)cbtc for now
-  console.log("(hack) funding FrictionlessZapper")
-  const cbtcOldWhale = "0x49D5df7773936deCc72e0E305F28190Bc1A13E08"
-  await impersonateAccount(cbtcOldWhale)
-  const wbtcWhaleSigner = await hre.ethers.getSigner(cbtcOldWhale)
-
-  const ERC20 = await hre.ethers.getContractFactory("ERC20Mock")
-  await ERC20.attach("0xc11b1268c1a384e55c48c2391d8d480264a3a7f4").connect(wbtcWhaleSigner).transfer(
-    frictionlessZapper.address,
-    parseUnits("0.03260663", 8),
-    {
-      gasLimit: 150000
-    }
-  )
 
   const Zapper = await hre.ethers.getContractFactory("Zapper");
   const permit2Address = "0x000000000022d473030f116ddee9f6b43ac78ba3";

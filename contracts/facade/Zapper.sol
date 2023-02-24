@@ -47,26 +47,26 @@ contract Zapper is ReentrancyGuard, ERC2771Context {
             Address.functionCall(params.trades[i].target, params.trades[i].input);
         }
 
-        {
-            // The input token may actually be part of the *precursor* token set.
-            // IRTokenZapper refund the input token back to the sender if it is not used.
-            uint256 inputTokenBalance = params.tokenIn.balanceOf(address(this));
-            SafeERC20.safeTransfer(
-                params.tokenIn,
-                address(params.postTradeActionsAddress),
-                inputTokenBalance
-            );
-        }
+        // The input token may actually be part of the *precursor* token set.
+        // IRTokenZapper refund the input token back to the sender if it is not used.
+        uint256 inputTokenBalance = params.tokenIn.balanceOf(address(this));
+        SafeERC20.safeTransfer(
+            params.tokenIn,
+            address(params.postTradeActionsAddress),
+            inputTokenBalance
+        );
 
-        // STEP 3: Post trade actions (Wrapping tokens etc)
+        // STEP 3: Execute RToken specific logic + issue tokens to sender
         IRTokenZapper(params.postTradeActionsAddress).convertPrecursorTokensToRToken(
             _msgSender(),
             params
         );
 
-        uint256 difference = params.tokenOut.balanceOf(_msgSender()) - initialBalance;
-        // STEP 4: Issue rtokens 'amountOut' will make sure dynamic subcalls
-        require(difference >= params.amountOut, "Insuficient RTokens minted");
+        // STEP 4: Verify that the user has gotten the issueance they requested
+        uint256 newBalance = params.tokenOut.balanceOf(_msgSender());
+        require(newBalance > initialBalance, "INVALID_NEW_BALANCE");
+        uint256 difference = newBalance - initialBalance;
+        require(difference >= params.amountOut, "INSUFFICIENT_OUT");
     }
 
     receive() external payable {
@@ -75,7 +75,7 @@ contract Zapper is ReentrancyGuard, ERC2771Context {
 
     function zapERC20(ZapERC20Params calldata params) external nonReentrant {
         require(params.amountIn != 0, "INVALID_INPUT_AMOUNT");
-        require(params.amountOut != 0, "INVALIT_OUTPUT_AMOUNT");
+        require(params.amountOut != 0, "INVALID_OUTPUT_AMOUNT");
         pullFunds(params.tokenIn, params.amountIn);
         zapERC20_(params);
     }
@@ -86,7 +86,7 @@ contract Zapper is ReentrancyGuard, ERC2771Context {
         bytes calldata signature
     ) external nonReentrant {
         require(params.amountIn != 0, "INVALID_INPUT_AMOUNT");
-        require(params.amountOut != 0, "INVALIT_OUTPUT_AMOUNT");
+        require(params.amountOut != 0, "INVALID_OUTPUT_AMOUNT");
 
         permit2.permitTransferFrom(
             permit,
@@ -102,7 +102,7 @@ contract Zapper is ReentrancyGuard, ERC2771Context {
         require(address(params.tokenIn) == address(wrappedNative), "INVALID_INPUT_TOKEN");
         require(params.amountIn == msg.value, "INVALID_INPUT_AMOUNT");
         require(msg.value != 0, "INVALID_INPUT_AMOUNT");
-        require(params.amountOut != 0, "INVALIT_OUTPUT_AMOUNT");
+        require(params.amountOut != 0, "INVALID_OUTPUT_AMOUNT");
         wrappedNative.deposit{ value: msg.value }();
         zapERC20_(params);
     }

@@ -2,7 +2,7 @@
 pragma solidity 0.8.17;
 
 // import { IStaticATokenLM } from "../../plugins/aave/IStaticATokenLM.sol";
-
+import "hardhat/console.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ZapERC20Params, TokenQuantity, IRTokenZapper } from "../../interfaces/IRTokenZapper.sol";
@@ -168,10 +168,12 @@ contract FrictionlessZapper is IRTokenZapper {
             } else if (cTokens[outAsset] != address(0)) {
                 ICToken cToken = ICToken(outAsset);
                 address underlying = cTokens[outAsset];
-                if (!IComptroller(cToken.comptroller()).mintGuardianPaused(address(cToken))) {
-                    quantityNeeded = cTokenQuantityToUnderlyingQuantity(quantityNeeded, cToken);
-                    outAsset = underlying;
-                }
+                require(
+                    !IComptroller(cToken.comptroller()).mintGuardianPaused(address(cToken)),
+                    "CTOKEN_MINTING_PAUSED"
+                );
+                quantityNeeded = cTokenQuantityToUnderlyingQuantity(quantityNeeded, cToken);
+                outAsset = underlying;
             }
             updateTokenQuantityArray(out, outAsset, quantityNeeded);
         }
@@ -183,7 +185,7 @@ contract FrictionlessZapper is IRTokenZapper {
             // solhint-disable no-inline-assembly
             assembly {
                 // Dangerous assembly here means:
-                // Set the length of out to i. Resize out to be length i.
+                // Resize 'out' to be length 'i'.
                 mstore(out, i)
             }
             break;
@@ -204,6 +206,7 @@ contract FrictionlessZapper is IRTokenZapper {
     }
 
     /// @param receiver Who to issue RTokens to, and send refunds
+    /// @param params Parameters of the Zap
     function convertPrecursorTokensToRToken(address receiver, ZapERC20Params calldata params)
         external
         override
@@ -236,32 +239,37 @@ contract FrictionlessZapper is IRTokenZapper {
             } else if (cTokens[erc20s[i]] != address(0)) {
                 IERC20 underlying = IERC20(cTokens[erc20s[i]]);
                 ICToken cToken = ICToken(erc20s[i]);
+                require(
+                    !IComptroller(cToken.comptroller()).mintGuardianPaused(address(cToken)),
+                    "CTOKEN_MINTING_PAUSED"
+                );
+                setupApprovalFor(underlying, address(cToken));
+                quantity = cTokenQuantityToUnderlyingQuantity(quantity, cToken);
 
-                if (!IComptroller(cToken.comptroller()).mintGuardianPaused(address(cToken))) {
-                    setupApprovalFor(underlying, address(cToken));
-                    quantity = cTokenQuantityToUnderlyingQuantity(quantity, cToken);
-                    if (underlying == wrappedNative) {
-                        wrappedNative.withdraw(quantity);
-
-                        CEther(address(cToken)).mint{ value: quantity }();
-                    } else {
-                        cToken.mint(quantity);
-                    }
+                if (underlying == wrappedNative) {
+                    wrappedNative.withdraw(quantity);
+                    CEther(address(cToken)).mint{ value: quantity }();
+                } else {
+                    cToken.mint(quantity);
                 }
             }
             setupApprovalFor(IERC20(erc20s[i]), address(rToken));
         }
         rToken.issueTo(receiver, params.amountOut);
 
-        cleanup(receiver);
+        refundResiduals(receiver, params);
     }
 
-    function cleanup(address receiver) internal {
+    function refundResiduals(address receiver, ZapERC20Params calldata params) internal {
         for (uint256 index = 0; index < config.tokens.length; index++) {
             uint256 quantity = config.tokens[index].balanceOf(address(this));
             if (quantity != 0) {
                 SafeERC20.safeTransfer(IERC20(config.tokens[index]), receiver, quantity);
             }
+        }
+        uint256 quantity = params.tokenIn.balanceOf(address(this));
+        if (quantity != 0) {
+            SafeERC20.safeTransfer(IERC20(params.tokenIn), receiver, quantity);
         }
         for (uint256 index = 0; index < config.saTokens.length; index++) {
             uint256 quantity = config.saTokens[index].balanceOf(address(this));
