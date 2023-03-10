@@ -8,39 +8,30 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC2771Context } from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 
 import { IWrappedNative } from "../interfaces/IWrappedNative.sol";
-import { ZapERC20Params } from "../interfaces/IRTokenZapper.sol";
+import { Call, ZapERC20Params } from "../interfaces/IRTokenZapper.sol";
 import { IPermit2, SignatureTransferDetails, PermitTransferFrom } from "../interfaces/IPermit2.sol";
 
 contract ZapperExecutor {
-    struct Call {
-        address to;
-        bytes data;
-        uint256 value;
-    }
-
     receive() external payable {}
 
-    function decodeCall(bytes calldata encodedCmd) internal returns (Call memory out) {
-        (out) = abi.decode(encodedCmd, (Call));
-    }
-
-    /** Main endpoint to call */
-    function execute(bytes[] calldata calls) external {
+    /** @dev Main endpoint to call
+      * @param calls - Each call to execute
+    */
+    function execute(Call[] calldata calls) external {
         uint256 len = calls.length;
-        Call memory call;
-
         for (uint256 i; i < len; i++) {
-            call = decodeCall(calls[i]);
-
-            if (call.value == 0) {
-                Address.functionCall(call.to, call.data);
+            if (calls[i].value == 0) {
+                Address.functionCall(calls[i].to, calls[i].data);
             } else {
-                Address.functionCallWithValue(call.to, call.data, call.value);
+                Address.functionCallWithValue(calls[i].to, calls[i].data, calls[i].value);
             }
         }
     }
 
-    /** Utility for returning remaining funds back to user */
+    /** @dev Utility for returning remaining funds back to user
+      * @param tokens - Tokens to move out of the ZapperExecutor contract
+      * @param destination - Recipient of the ERC20 transfers
+    */
     function drainERC20s(IERC20[] calldata tokens, address destination) external {
         uint256 len = tokens.length;
         for (uint256 i; i < len; i++) {
@@ -53,8 +44,12 @@ contract ZapperExecutor {
         }
     }
 
-    /** Utility for setting up all neccesary approvals for Zap */
+    /** @dev Utility for setting up all neccesary approvals for Zap
+      * @param tokens - Tokens to set up approvals
+      * @param spenders - Spenders - i'th token will be approved for i'th spender
+    */
     function setupApprovals(IERC20[] calldata tokens, address[] calldata spenders) external {
+        require(tokens.length == spenders.length, "Invalid params");
         uint256 len = tokens.length;
         for (uint256 i; i < len; i++) {
             IERC20 token = tokens[i];
@@ -71,15 +66,15 @@ contract ZapperExecutor {
 
     /** Callbacks added to allow the executor to directly trade with uniswapv3-like pools */
     function algebraSwapCallback(int256, int256, bytes calldata data) external {
-        this.execute(abi.decode(data, (bytes[])));
+        this.execute(abi.decode(data, (Call[])));
     }
 
     function uniswapV3SwapCallback(int256, int256, bytes calldata data) external {
-        this.execute(abi.decode(data, (bytes[])));
+        this.execute(abi.decode(data, (Call[])));
     }
 
     function swapCallback(int256, int256, bytes calldata data) external {
-        this.execute(abi.decode(data, (bytes[])));
+        this.execute(abi.decode(data, (Call[])));
     }
 }
 

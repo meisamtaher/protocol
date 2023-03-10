@@ -22,7 +22,7 @@ const createCall = (to: string, payload: string, comment = ""): ZapperContractCa
 interface EUSDZapParams {
   user: string;
   executorAddress: string;
-  provider: providers.Provider;
+  provider: providers.JsonRpcSigner;
   inputToken: string;
   outputTokenAmount: bigint;
   basketHandler: IBasketHandler;

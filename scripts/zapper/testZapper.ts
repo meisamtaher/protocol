@@ -1,10 +1,8 @@
-import { ethers, utils } from "ethers";
+import { ethers } from "ethers";
 import { formatEther, parseEther } from "ethers/lib/utils";
 import hre from "hardhat";
 import { impersonateAccount } from "@nomicfoundation/hardhat-network-helpers";
-import { encodeFunctionCall } from "./types";
 import { searchForEUSDZap } from "./zap-to-eUSD";
-import { util } from "chai";
 
 async function main() {
   if (hre.network.name !== 'hardhat') {
@@ -76,20 +74,16 @@ async function main() {
   const actions = await searchForEUSDZap({
     inputToken: inputTokenAddr,
     user: user,
-    provider: hre.ethers.provider,
+    provider: hre.ethers.provider as any,
     executorAddress: executorInst.address,
     basketHandler: basketHandler,
     outputTokenAmount: userWantsRTokenSum.toBigInt()
   })
 
-  // const encodedCalls = actions.calls.map(i => encodeFunctionCall(i.to, i.payload))
-  const encodedCalls = actions.calls.map(i => utils.defaultAbiCoder.encode(
-    ["(address,bytes,uint256)"],
-    [[i.to,i.payload,0]]
-  ))
+  const encodedCalls = actions.calls.map(i => ({ value: 0, to: i.to, data: i.payload }))
   console.log(encodedCalls)
 
-  console.log("Approvals")
+  console.log("Setting up approvals up front to exclude them from gas calculations")
   await executorInst.execute([encodedCalls[0]])
 
   try {
@@ -97,7 +91,7 @@ async function main() {
     const tx = await zapperInst.connect(signer).zapERC20({
       tokenIn: inputToken.address,
       amountIn: inputBal,
-      trades: encodedCalls.slice(1),
+      commands: encodedCalls.slice(1),
       amountOut: userWantsRTokenSum,
       tokenOut: rToken.address
     }, {
