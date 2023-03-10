@@ -8,24 +8,95 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC2771Context } from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 
 import { IWrappedNative } from "../interfaces/IWrappedNative.sol";
-import { ZapERC20Params, IRTokenZapper } from "../interfaces/IRTokenZapper.sol";
+import { ZapERC20Params } from "../interfaces/IRTokenZapper.sol";
 import { IPermit2, SignatureTransferDetails, PermitTransferFrom } from "../interfaces/IPermit2.sol";
+
+contract ZapperExecutor {
+    struct Call {
+        address to;
+        bytes data;
+        uint256 value;
+    }
+
+    receive() external payable {}
+
+    function decodeCall(bytes calldata encodedCmd) internal returns (Call memory out) {
+        (out) = abi.decode(encodedCmd, (Call));
+    }
+
+    /** Main endpoint to call */
+    function execute(bytes[] calldata calls) external {
+        uint256 len = calls.length;
+        Call memory call;
+
+        for (uint256 i; i < len; i++) {
+            call = decodeCall(calls[i]);
+
+            if (call.value == 0) {
+                Address.functionCall(call.to, call.data);
+            } else {
+                Address.functionCallWithValue(call.to, call.data, call.value);
+            }
+        }
+    }
+
+    /** Utility for returning remaining funds back to user */
+    function drainERC20s(IERC20[] calldata tokens, address destination) external {
+        uint256 len = tokens.length;
+        for (uint256 i; i < len; i++) {
+            IERC20 token = tokens[i];
+            uint256 balance = token.balanceOf(address(this));
+            if (balance == 0) {
+                continue;
+            }
+            SafeERC20.safeTransfer(token, destination, balance);
+        }
+    }
+
+    /** Utility for setting up all neccesary approvals for Zap */
+    function setupApprovals(IERC20[] calldata tokens, address[] calldata spenders) external {
+        uint256 len = tokens.length;
+        for (uint256 i; i < len; i++) {
+            IERC20 token = tokens[i];
+            address spender = spenders[i];
+
+            uint256 allowance = token.allowance(address(this), spender);
+
+            if (allowance != 0) {
+                continue;
+            }
+            SafeERC20.safeApprove(token, spender, type(uint256).max);
+        }
+    }
+
+    /** Callbacks added to allow the executor to directly trade with uniswapv3-like pools */
+    function algebraSwapCallback(int256, int256, bytes calldata data) external {
+        this.execute(abi.decode(data, (bytes[])));
+    }
+
+    function uniswapV3SwapCallback(int256, int256, bytes calldata data) external {
+        this.execute(abi.decode(data, (bytes[])));
+    }
+
+    function swapCallback(int256, int256, bytes calldata data) external {
+        this.execute(abi.decode(data, (bytes[])));
+    }
+}
 
 contract Zapper is ReentrancyGuard, ERC2771Context {
     IWrappedNative internal immutable wrappedNative;
     IPermit2 internal immutable permit2;
+    ZapperExecutor internal immutable zapperExecutor;
 
     constructor(
         address trustedForwarder,
         IWrappedNative wrappedNative_,
-        IPermit2 permit2_
+        IPermit2 permit2_,
+        ZapperExecutor executor_
     ) ERC2771Context(trustedForwarder) {
         wrappedNative = wrappedNative_;
         permit2 = permit2_;
-    }
-
-    function pullFunds(IERC20 token, uint256 amount) internal {
-        SafeERC20.safeTransferFrom(token, _msgSender(), address(this), amount);
+        zapperExecutor = executor_;
     }
 
     function setupApprovalFor(IERC20 token, address spender) internal {
@@ -37,32 +108,11 @@ contract Zapper is ReentrancyGuard, ERC2771Context {
     }
 
     function zapERC20_(ZapERC20Params calldata params) internal {
-        // STEP 1: Pull cursor token
         uint256 initialBalance = params.tokenOut.balanceOf(_msgSender());
+        // STEP 1: Execute
+        zapperExecutor.execute(params.commands);
 
-        // STEP 2: Purchase precursor tokens
-        uint256 len = params.trades.length;
-        for (uint256 i = 0; i < len; i++) {
-            setupApprovalFor(params.tokenIn, params.trades[i].target);
-            Address.functionCall(params.trades[i].target, params.trades[i].input);
-        }
-
-        // The input token may actually be part of the *precursor* token set.
-        // IRTokenZapper refund the input token back to the sender if it is not used.
-        uint256 inputTokenBalance = params.tokenIn.balanceOf(address(this));
-        SafeERC20.safeTransfer(
-            params.tokenIn,
-            address(params.postTradeActionsAddress),
-            inputTokenBalance
-        );
-
-        // STEP 3: Execute RToken specific logic + issue tokens to sender
-        IRTokenZapper(params.postTradeActionsAddress).convertPrecursorTokensToRToken(
-            _msgSender(),
-            params
-        );
-
-        // STEP 4: Verify that the user has gotten the issueance they requested
+        // STEP 2: Verify that the user has gotten the tokens they requested
         uint256 newBalance = params.tokenOut.balanceOf(_msgSender());
         require(newBalance > initialBalance, "INVALID_NEW_BALANCE");
         uint256 difference = newBalance - initialBalance;
@@ -76,7 +126,12 @@ contract Zapper is ReentrancyGuard, ERC2771Context {
     function zapERC20(ZapERC20Params calldata params) external nonReentrant {
         require(params.amountIn != 0, "INVALID_INPUT_AMOUNT");
         require(params.amountOut != 0, "INVALID_OUTPUT_AMOUNT");
-        pullFunds(params.tokenIn, params.amountIn);
+        SafeERC20.safeTransferFrom(
+            params.tokenIn,
+            _msgSender(),
+            address(zapperExecutor),
+            params.amountIn
+        );
         zapERC20_(params);
     }
 
@@ -90,7 +145,10 @@ contract Zapper is ReentrancyGuard, ERC2771Context {
 
         permit2.permitTransferFrom(
             permit,
-            SignatureTransferDetails({ to: address(this), requestedAmount: params.amountIn }),
+            SignatureTransferDetails({
+                to: address(zapperExecutor),
+                requestedAmount: params.amountIn
+            }),
             _msgSender(),
             signature
         );
@@ -104,6 +162,11 @@ contract Zapper is ReentrancyGuard, ERC2771Context {
         require(msg.value != 0, "INVALID_INPUT_AMOUNT");
         require(params.amountOut != 0, "INVALID_OUTPUT_AMOUNT");
         wrappedNative.deposit{ value: msg.value }();
+        SafeERC20.safeTransfer(
+            wrappedNative,
+            address(zapperExecutor),
+            wrappedNative.balanceOf(address(this))
+        );
         zapERC20_(params);
     }
 }
