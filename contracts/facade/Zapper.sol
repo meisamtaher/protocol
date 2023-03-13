@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BlueOak-1.0.0
 pragma solidity 0.8.17;
+import "hardhat/console.sol";
 import { Address } from "@openzeppelin/contracts/utils/Address.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
@@ -20,6 +21,7 @@ contract ZapperExecutor {
     function execute(Call[] calldata calls) external {
         uint256 len = calls.length;
         for (uint256 i; i < len; i++) {
+            console.log(calls[i].to);
             if (calls[i].value == 0) {
                 Address.functionCall(calls[i].to, calls[i].data);
             } else {

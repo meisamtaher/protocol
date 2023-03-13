@@ -87,10 +87,11 @@ async function main() {
   await executorInst.execute([encodedCalls[0]])
 
   try {
-    console.log("Executing")
+    const amountIn = actions.inputTokenAmount + actions.inputTokenAmount / 100n;
+    console.log("Executing", amountIn)
     const tx = await zapperInst.connect(signer).zapERC20({
       tokenIn: inputToken.address,
-      amountIn: inputBal,
+      amountIn,
       commands: encodedCalls.slice(1),
       amountOut: userWantsRTokenSum,
       tokenOut: rToken.address
