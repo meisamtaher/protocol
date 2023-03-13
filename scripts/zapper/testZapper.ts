@@ -1,5 +1,5 @@
 import { ethers } from "ethers";
-import { formatEther, parseEther } from "ethers/lib/utils";
+import { formatEther, parseEther, parseUnits } from "ethers/lib/utils";
 import hre from "hardhat";
 import { impersonateAccount } from "@nomicfoundation/hardhat-network-helpers";
 import { searchForEUSDZap } from "./zap-to-eUSD";
@@ -56,6 +56,12 @@ async function main() {
     gasLimit: 100000
   })
   console.log("Run")
+
+  await impersonateAccount("0xdfd5293d8e347dfe59e90efd55b2956a1343963d")
+  await inputToken.connect(hre.ethers.provider.getSigner("0xdfd5293d8e347dfe59e90efd55b2956a1343963d")).transfer(
+    user,
+    parseUnits("10000", 6)
+  )
 
 
 

@@ -155,7 +155,7 @@ export const searchForEUSDZap = async (
       ZapperExecutor__factory.createInterface().encodeFunctionData(
         "drainERC20s",
         [
-          [eUSDAddresses.cusdt, eUSDAddresses.cusdt, eUSDAddresses.sausdt],
+          [eUSDAddresses.usdt, eUSDAddresses.cusdt, eUSDAddresses.sausdt],
           user
         ]
       ),
