@@ -1,12 +1,8 @@
 import { ethers } from 'ethers'
-import { formatEther, parseUnits } from 'ethers/lib/utils'
 import hre from 'hardhat'
-import { impersonateAccount } from '@nomicfoundation/hardhat-network-helpers'
-import { searchForEUSDZap } from './zap-to-eUSD'
 import { getChainId } from '#/common/blockchain-utils'
 import { networkConfig } from '#/common/configuration'
-import { getDeploymentFile, getDeploymentFilename, IDeployments } from '../deployment/common'
-
+import fs from 'fs'
 async function main() {
   const chainId = await getChainId(hre)
 
@@ -17,31 +13,32 @@ async function main() {
   const weth = config.tokens.WETH!
   const Zapper = await hre.ethers.getContractFactory('Zapper')
   const ZapperExecutorFactory = await hre.ethers.getContractFactory('ZapperExecutor')
-  const deploymentFilename = getDeploymentFilename(chainId)
-  const deployments = <IDeployments>getDeploymentFile(deploymentFilename)
+  const deploymentFilename = './scripts/addresses/1-zapper-1.0.0.json'
 
   const permit2Address = config.PERMIT2 ?? ethers.constants.AddressZero
   console.log('Deploying zapper executor')
   const executorInst = await ZapperExecutorFactory.deploy()
+  await executorInst.deployed()
   console.log('Zapper executor deployed to', executorInst.address)
-  deployments.zapperExecutor = executorInst.address
 
   console.log('Deploying zapper')
-  const zapperInst = await Zapper.deploy(
-    ethers.constants.AddressZero,
-    weth,
-    permit2Address,
-    executorInst.address,
-    {
-      nonce: executorInst.deployTransaction.nonce + 1
-    }
-  )
+  const zapperInst = await Zapper.deploy(weth, permit2Address, executorInst.address)
+
   console.log('Zapper deployed to', zapperInst.address)
-  deployments.zapper = zapperInst.address
+  await zapperInst.deployed()
+  fs.writeFileSync(
+    deploymentFilename,
+    JSON.stringify(
+      {
+        zapperExecutor: executorInst.address,
+        zapper: zapperInst.address
+      },
+      null,
+      2
+    )
+  )
 }
 
-// We recommend this pattern to be able to use async/await everywhere
-// and properly handle errors.
 main().catch((error) => {
   console.error(error)
   process.exitCode = 1

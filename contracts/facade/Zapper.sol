@@ -15,8 +15,8 @@ contract ZapperExecutor {
     receive() external payable {}
 
     /** @dev Main endpoint to call
-      * @param calls - Each call to execute
-    */
+     * @param calls - Each call to execute
+     */
     function execute(Call[] calldata calls) external {
         uint256 len = calls.length;
         for (uint256 i; i < len; i++) {
@@ -29,9 +29,9 @@ contract ZapperExecutor {
     }
 
     /** @dev Utility for returning remaining funds back to user
-      * @param tokens - Tokens to move out of the ZapperExecutor contract
-      * @param destination - Recipient of the ERC20 transfers
-    */
+     * @param tokens - Tokens to move out of the ZapperExecutor contract
+     * @param destination - Recipient of the ERC20 transfers
+     */
     function drainERC20s(IERC20[] calldata tokens, address destination) external {
         uint256 len = tokens.length;
         for (uint256 i; i < len; i++) {
@@ -45,9 +45,9 @@ contract ZapperExecutor {
     }
 
     /** @dev Utility for setting up all neccesary approvals for Zap
-      * @param tokens - Tokens to set up approvals
-      * @param spenders - Spenders - i'th token will be approved for i'th spender
-    */
+     * @param tokens - Tokens to set up approvals
+     * @param spenders - Spenders - i'th token will be approved for i'th spender
+     */
     function setupApprovals(IERC20[] calldata tokens, address[] calldata spenders) external {
         require(tokens.length == spenders.length, "Invalid params");
         uint256 len = tokens.length;
@@ -65,15 +65,27 @@ contract ZapperExecutor {
     }
 
     /** Callbacks added to allow the executor to directly trade with uniswapv3-like pools */
-    function algebraSwapCallback(int256, int256, bytes calldata data) external {
+    function algebraSwapCallback(
+        int256,
+        int256,
+        bytes calldata data
+    ) external {
         this.execute(abi.decode(data, (Call[])));
     }
 
-    function uniswapV3SwapCallback(int256, int256, bytes calldata data) external {
+    function uniswapV3SwapCallback(
+        int256,
+        int256,
+        bytes calldata data
+    ) external {
         this.execute(abi.decode(data, (Call[])));
     }
 
-    function swapCallback(int256, int256, bytes calldata data) external {
+    function swapCallback(
+        int256,
+        int256,
+        bytes calldata data
+    ) external {
         this.execute(abi.decode(data, (Call[])));
     }
 }
