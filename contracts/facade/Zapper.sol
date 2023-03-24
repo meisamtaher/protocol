@@ -78,29 +78,28 @@ contract ZapperExecutor {
     }
 }
 
-contract Zapper is ReentrancyGuard, ERC2771Context {
+contract Zapper is ReentrancyGuard {
     IWrappedNative internal immutable wrappedNative;
     IPermit2 internal immutable permit2;
     ZapperExecutor internal immutable zapperExecutor;
 
     constructor(
-        address trustedForwarder,
         IWrappedNative wrappedNative_,
         IPermit2 permit2_,
         ZapperExecutor executor_
-    ) ERC2771Context(trustedForwarder) {
+    ) {
         wrappedNative = wrappedNative_;
         permit2 = permit2_;
         zapperExecutor = executor_;
     }
 
     function zapERC20_(ZapERC20Params calldata params) internal {
-        uint256 initialBalance = params.tokenOut.balanceOf(_msgSender());
+        uint256 initialBalance = params.tokenOut.balanceOf(msg.sender);
         // STEP 1: Execute
         zapperExecutor.execute(params.commands);
 
         // STEP 2: Verify that the user has gotten the tokens they requested
-        uint256 newBalance = params.tokenOut.balanceOf(_msgSender());
+        uint256 newBalance = params.tokenOut.balanceOf(msg.sender);
         require(newBalance > initialBalance, "INVALID_NEW_BALANCE");
         uint256 difference = newBalance - initialBalance;
         require(difference >= params.amountOut, "INSUFFICIENT_OUT");
@@ -115,7 +114,7 @@ contract Zapper is ReentrancyGuard, ERC2771Context {
         require(params.amountOut != 0, "INVALID_OUTPUT_AMOUNT");
         SafeERC20.safeTransferFrom(
             params.tokenIn,
-            _msgSender(),
+            msg.sender,
             address(zapperExecutor),
             params.amountIn
         );
@@ -136,7 +135,7 @@ contract Zapper is ReentrancyGuard, ERC2771Context {
                 to: address(zapperExecutor),
                 requestedAmount: params.amountIn
             }),
-            _msgSender(),
+            msg.sender,
             signature
         );
 

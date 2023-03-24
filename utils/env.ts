@@ -18,6 +18,7 @@ type IEnvVars =
   | 'ONLY_FAST'
   | 'JOBS'
   | 'EXTREME'
+  | 'PRIVATE_KEY'
 
 export function useEnv(key: IEnvVars | IEnvVars[], _default = ''): string {
   if (typeof key === 'string') {

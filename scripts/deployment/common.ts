@@ -19,6 +19,8 @@ export interface IDeployments {
   facadeAct: string
   deployer: string
   rsrAsset: string
+  zapper: string,
+  zapperExecutor: string,
   implementations: IImplementations
 }
 
